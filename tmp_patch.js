@@ -1,12 +1,15 @@
 ﻿async function fetchMatches() {
   try {
+    const today = new Date().toISOString().split("T")[0];
+
     const res = await axios.get(
-      "https://api.football-data.org/v4/matches?status=SCHEDULED",
+      `https://api.football-data.org/v4/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${today}`,
       {
         headers: { "X-Auth-Token": API_KEY },
         timeout: 15000
       }
     );
+
     return res.data.matches || [];
   } catch (err) {
     if (err.response) {
