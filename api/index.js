@@ -3,17 +3,17 @@ const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// лавное меню с кнопками
 bot.start((ctx) => {
-    return ctx.reply('💎 обро пожаловать в Auditor Football!\nыберите интересующий раздел:', 
+    return ctx.reply('💎 Premium Football Auditor\nыберите инструмент аналитики:', 
         Markup.inlineKeyboard([
-            [Markup.button.callback('🏟 лижайший матч', 'get_next')],
-            [Markup.button.callback('🏆 Топ-5 лиг нглии', 'get_leagues')]
+            [Markup.button.callback('📊 лижайший матч', 'get_next')],
+            [Markup.button.callback('🏆 Топ-5 лиг', 'get_leagues')],
+            [Markup.button.webApp('🚀 ткрыть ашборд (TMA)', 'https://' + ctx.host + '/')]
         ])
     );
 });
 
-// бработка нажатия на кнопку "лижайший матч"
+// бработка кнопки "лижайший матч"
 bot.action('get_next', async (ctx) => {
     try {
         const res = await axios.get('https://api-football-v1.p.rapidapi.com/v3/fixtures?next=1', {
@@ -23,17 +23,11 @@ bot.action('get_next', async (ctx) => {
             }
         });
         const game = res.data.response[0];
-        if (!game) return ctx.editMessageText('атчей не найдено 🤷‍♂️');
-        
-        const message = "🎯  Т:\n\n" + 
-                        "🏠 " + game.teams.home.name + " vs " + game.teams.away.name + " 🚀\n" +
-                        "🏆 ига: " + game.league.name + "\n" +
-                        "⏰ Статус: " + game.fixture.status.long;
-        
-        await ctx.answerCbQuery(); // бираем "часики" с кнопки
-        return ctx.reply(message);
+        const text = game ? "🏟 MATCH: " + game.teams.home.name + " vs " + game.teams.away.name : 'атчей нет';
+        await ctx.answerCbQuery();
+        return ctx.reply(text);
     } catch (e) {
-        return ctx.reply('❌ шибка API. роверь FOOTBALL_API_KEY в настройках Vercel.');
+        return ctx.reply('❌ шибка API');
     }
 });
 

@@ -17,7 +17,7 @@ async function testSpecificProxy() {
 
     for (let item of agents) {
         try {
-            console.log('роверка: ' + item.name + '...');
+            console.log('Проверка: ' + item.name + '...');
             const res = await axios.get(targetUrl, { 
                 httpsAgent: item.agent, 
                 timeout: 5000,
@@ -27,7 +27,7 @@ async function testSpecificProxy() {
                 }
             });
             console.log('✅ ТТ! Тип: ' + item.name);
-            console.log('твет API (статус):', res.status);
+            console.log('Ответ API (статус):', res.status);
             return;
         } catch (err) {
             if (err.response && err.response.status === 451) {
@@ -37,7 +37,7 @@ async function testSpecificProxy() {
             console.log('❌ ' + item.name + ' не подошел: ' + err.message);
         }
     }
-    console.log('\n💡 ывод: орт 9022 виден, но прокси на нем не отвечает. роверь, включен ли VPN и разрешены ли в нем системные подключения.');
+    console.log('\n💡Вывод: орт 9022 виден, но прокси на нем не отвечает.Проверь, включен ли VPN и разрешены ли в нем системные подключения.');
 }
 
 testSpecificProxy();
