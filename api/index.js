@@ -5,85 +5,128 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
+if (!FOOTBALL_DATA_API_KEY) throw new Error("FOOTBALL_DATA_API_KEY missing");
+
 const bot = new Telegraf(BOT_TOKEN);
 
-let lastErrors = [];
-let quietMode = true;
+const CACHE_TTL = 15 * 60 * 1000; // 15 мин
+let cache = { at: 0, data: null };
 
-function logError(where, e){
-  lastErrors.push({
-    time: new Date().toISOString(),
-    where,
-    status: e?.response?.status || null,
-    msg: e?.message || String(e)
-  });
-  if (lastErrors.length > 10) lastErrors.shift();
-}
+function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
 
-async function fetchMatches(){
+async function getMatches(){
+  const now = Date.now();
+  if (cache.data && (now - cache.at) < CACHE_TTL) return cache.data;
+
   const res = await axios.get("https://api.football-data.org/v4/matches", {
     headers: { "X-Auth-Token": FOOTBALL_DATA_API_KEY },
     timeout: 20000
   });
-  return res.data.matches || [];
+
+  cache = { at: now, data: res.data.matches || [] };
+  return cache.data;
 }
 
-function buildReport(matches){
-  let out = "⚽ удит матчей\n\n";
+async function getTeamStats(teamId){
+  const res = await axios.get(
+    `https://api.football-data.org/v4/teams/${teamId}/matches?status=FINISHED&limit=5`,
+    { headers: { "X-Auth-Token": FOOTBALL_DATA_API_KEY }, timeout: 20000 }
+  );
 
-  matches.slice(0,5).forEach(m=>{
-    const home = m.homeTeam?.name;
-    const away = m.awayTeam?.name;
-    const percent = Math.floor(Math.random()*20)+70;
+  const matches = res.data.matches || [];
+  let scored = 0, conceded = 0;
 
-    out += `${home} — ${away}\n`;
-    out += `📊 ероятность: ${percent}%\n\n`;
+  matches.forEach(m=>{
+    const isHome = m.homeTeam.id === teamId;
+    const homeGoals = m.score.fullTime.home || 0;
+    const awayGoals = m.score.fullTime.away || 0;
+
+    if (isHome){
+      scored += homeGoals;
+      conceded += awayGoals;
+    } else {
+      scored += awayGoals;
+      conceded += homeGoals;
+    }
   });
 
-  out += "ℹ️ ероятностная модель (не гарантия).";
+  const count = matches.length || 1;
+  return {
+    avg_scored: scored / count,
+    avg_conceded: conceded / count
+  };
+}
+
+async function evaluateMatch(match){
+  const homeId = match.homeTeam.id;
+  const awayId = match.awayTeam.id;
+
+  const homeStats = await getTeamStats(homeId);
+  const awayStats = await getTeamStats(awayId);
+
+  const expectedGoals =
+    ((homeStats.avg_scored + awayStats.avg_conceded)/2) +
+    ((awayStats.avg_scored + homeStats.avg_conceded)/2);
+
+  if (expectedGoals < 2.6) return null;
+
+  const probability = clamp(Math.round(expectedGoals * 25), 55, 90);
+
+  return {
+    home: match.homeTeam.name,
+    away: match.awayTeam.name,
+    expectedGoals: expectedGoals.toFixed(2),
+    probability
+  };
+}
+
+async function buildModelReport(){
+  const matches = await getMatches();
+  const upcoming = matches.slice(0,4); // лимит нагрузки
+
+  const results = [];
+
+  for (const m of upcoming){
+    try{
+      const evalRes = await evaluateMatch(m);
+      if (evalRes) results.push(evalRes);
+      if (results.length >= 3) break;
+    }catch(e){
+      continue;
+    }
+  }
+
+  if (!results.length) return "ет подходящих матчей под Т 2.5.";
+
+  let out = "⚽ одель Т 2.5\n\n";
+
+  results.forEach(r=>{
+    out += `${r.home} — ${r.away}\n`;
+    out += `📈 Ставка: Т 2.5\n`;
+    out += `📊 ероятность: ${r.probability}%\n`;
+    out += `⚙ жидаемые голы: ${r.expectedGoals}\n\n`;
+  });
+
+  out += "ℹ️ сновано на последних 5 матчах команд.";
   return out;
 }
 
 function keyboard(){
   return Markup.inlineKeyboard([
-    [Markup.button.callback("🔍 айти сигналы", "find")],
-    [Markup.button.callback("🧪 Тест API", "test")],
-    [Markup.button.callback("📝 Формат текста", "toggle")],
-    [Markup.button.callback("📊 иагностика", "diag")]
+    [Markup.button.callback("🔍 айти сигналы (Т 2.5)", "model")]
   ]);
 }
 
 bot.start(ctx=>{
-  ctx.reply("🤖 от запущен", keyboard());
+  ctx.reply("🤖 еальная модель активна", keyboard());
 });
 
-bot.action("toggle", ctx=>{
-  quietMode = !quietMode;
-  ctx.reply("Формат: " + (quietMode ? "бычный" : "Markdown"));
-});
-
-bot.action("diag", ctx=>{
-  ctx.reply(lastErrors.length ? JSON.stringify(lastErrors,null,2) : "шибок нет");
-});
-
-bot.action("test", async ctx=>{
+bot.action("model", async ctx=>{
   try{
-    const data = await fetchMatches();
-    ctx.reply(`API работает. атчей: ${data.length}`);
-  }catch(e){
-    logError("test",e);
-    ctx.reply("шибка API: " + (e.message || ""));
-  }
-});
-
-bot.action("find", async ctx=>{
-  try{
-    const data = await fetchMatches();
-    const report = buildReport(data);
+    const report = await buildModelReport();
     ctx.reply(report);
   }catch(e){
-    logError("find",e);
-    ctx.reply("шибка. роверь лимиты API.");
+    ctx.reply("шибка модели / лимит API.");
   }
 });
 
