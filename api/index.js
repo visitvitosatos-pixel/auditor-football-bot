@@ -4,16 +4,16 @@ const axios = require('axios');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot.start((ctx) => {
-    return ctx.reply('💎 Premium Auditor: СИСТЕМА ГОТОВА\nВсе модули активны.', 
+    return ctx.reply('💎 Premium Auditor: READY\nМониторинг активен.', 
         Markup.inlineKeyboard([
-            [Markup.button.callback('📊 Начать аудит лиг', 'audit_leagues')]
+            [Markup.button.callback('📊 Провести аудит лиг', 'audit_leagues')]
         ])
     );
 });
 
 bot.action('audit_leagues', async (ctx) => {
     try {
-        await ctx.answerCbQuery('Загружаю данные из Лондона...');
+        await ctx.answerCbQuery('Загружаю список лиг...');
         const res = await axios.get('https://free-api-live-football-data.p.rapidapi.com/football-get-all-leagues', {
             headers: {
                 'X-RapidAPI-Key': process.env.FOOTBALL_API_KEY,
@@ -21,19 +21,17 @@ bot.action('audit_leagues', async (ctx) => {
             }
         });
 
-        // Берем топ-3 лиги из твоего ответа
-        const popular = res.data.response.popular.slice(0, 3);
-        let report = "📈 **ОТЧЕТ АУДИТОРА**\n\nДоступные рынки:\n";
+        // Достаем названия из твоего JSON (Premier League, LaLiga и т.д.)
+        const popular = res.data.response.popular;
+        let list = "🏆 **АКТУАЛЬНЫЕ ЛИГИ ДЛЯ АУДИТА:**\n\n";
         
-        popular.forEach(league => {
-            report += `🔹 ${league.name} (${league.ccode})\n`;
+        popular.slice(0, 10).forEach(league => {
+            list += `📍 ${league.name} [${league.ccode}]\n`;
         });
 
-        report += "\n✅ API Status: Online\n🔥 Рекомендуемая нагрузка: Низкая";
-
-        return ctx.replyWithMarkdown(report);
+        return ctx.replyWithMarkdown(list);
     } catch (e) {
-        return ctx.reply('❌ Ошибка при чтении данных. Проверьте лимиты на RapidAPI.');
+        return ctx.reply('❌ Ошибка API. Убедись, что подписка Basic активна.');
     }
 });
 
