@@ -2,7 +2,6 @@
 const axios = require("axios");
 const crypto = require("crypto");
 
-// ENV
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 const CHANNEL = process.env.CHANNEL;
@@ -14,8 +13,7 @@ const ADMIN_IDS = String(process.env.ADMIN_IDS || "")
 
 const MIN_PERCENT_CHANNEL = Number(process.env.MIN_PERCENT_CHANNEL || 80);
 const MIN_PERCENT_DM = Number(process.env.MIN_PERCENT_DM || 70);
-
-const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 10 * 60 * 1000); // 10 min
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 10 * 60 * 1000);
 const DEDUP_WINDOW_MS = Number(process.env.DEDUP_WINDOW_MS || 12 * 60 * 60 * 1000);
 
 const COMMIT_SHA =
@@ -26,9 +24,8 @@ const COMMIT_SHA =
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN is missing");
 const bot = new Telegraf(BOT_TOKEN);
 
-// runtime state (Vercel can reset on cold start)
-let quietMode = true;            // default: no Markdown
-let windowHours = 24;            // default
+let quietMode = true;
+let windowHours = 24;
 let cache = { at: 0, hours: 24, matches: null };
 let lastPostHash = null;
 let lastPostAt = 0;
@@ -55,14 +52,12 @@ function isAdminCtx(ctx) {
   return isAdminId(Number(ctx?.from?.id));
 }
 
-// Telegram send (quiet by default)
 async function tgSend(chatId, text) {
   const payload = { chat_id: chatId, text, disable_web_page_preview: true };
-  if (!quietMode) payload.parse_mode = "Markdown"; // если включишь
+  if (!quietMode) payload.parse_mode = "Markdown";
   await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, payload, { timeout: 15000 });
 }
 
-// Backoff wrapper
 async function withBackoff(fn, tries = 3) {
   let delay = 1000;
   for (let i = 0; i < tries; i++) {
@@ -76,7 +71,6 @@ async function withBackoff(fn, tries = 3) {
   }
 }
 
-// time window
 function inNextHours(utcDate, hours) {
   const t = Date.parse(utcDate);
   if (!Number.isFinite(t)) return true;
@@ -84,7 +78,6 @@ function inNextHours(utcDate, hours) {
   return t >= now && t <= now + hours * 60 * 60 * 1000;
 }
 
-// model (stub)
 function evaluateMatch(m) {
   const home = m.homeTeam?.name ?? "Home";
   const away = m.awayTeam?.name ?? "Away";
@@ -116,14 +109,11 @@ function buildReport(matches, limit, minPercent, hours) {
   return out;
 }
 
-// cached fetch
 async function fetchMatchesCached(hours) {
   if (!FOOTBALL_DATA_API_KEY) throw new Error("FOOTBALL_DATA_API_KEY missing");
 
   const now = Date.now();
-  if (cache.matches && cache.hours === hours && (now - cache.at) < CACHE_TTL_MS) {
-    return cache.matches;
-  }
+  if (cache.matches && cache.hours === hours && (now - cache.at) < CACHE_TTL_MS) return cache.matches;
 
   const url = "https://api.football-data.org/v4/matches";
   const cfg = { headers: { "X-Auth-Token": FOOTBALL_DATA_API_KEY }, timeout: 30000 };
@@ -139,44 +129,25 @@ async function fetchMatchesCached(hours) {
 
 function sha1(t) { return crypto.createHash("sha1").update(t).digest("hex"); }
 
-// set webhook (internal)
-async function setWebhook(req) {
-  const host = req.headers["x-forwarded-host"] || req.headers["host"];
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  const webhookUrl = `${proto}://${host}/`;
-
-  const tg = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
-    params: { url: webhookUrl },
-    timeout: 15000
-  });
-
-  return { webhookUrl, tg: tg.data };
-}
-
-// ===== Telegram UI =====
-function mainKeyboard(isAdmin) {
+function mainKeyboard(admin) {
   const rows = [
     [Markup.button.callback("Find signals", "find_signals")],
-    [
-      Markup.button.callback("6h", "win_6"),
-      Markup.button.callback("24h", "win_24"),
-      Markup.button.callback("Today", "win_today")
-    ],
+    [Markup.button.callback("6h", "win_6"), Markup.button.callback("24h", "win_24"), Markup.button.callback("Today", "win_today")],
     [Markup.button.callback(quietMode ? "Markdown: OFF" : "Markdown: ON", "toggle_md")]
   ];
-
-  if (isAdmin) {
-    rows.push([Markup.button.callback("Set webhook", "set_webhook")]);
-    rows.push([Markup.button.callback("Diag", "diag")]);
-  }
+  if (admin) rows.push([Markup.button.callback("Diag", "diag")]);
   return Markup.inlineKeyboard(rows);
 }
 
+// ===== MUST ALWAYS WORK =====
 bot.start((ctx) => {
   const admin = isAdminCtx(ctx);
-  return ctx.reply("Auditor: READY", mainKeyboard(admin));
+  return ctx.reply(`START_OK commit=${COMMIT_SHA}`, mainKeyboard(admin));
 });
 
+bot.command("ping", (ctx) => ctx.reply(`PONG commit=${COMMIT_SHA}`));
+
+// ===== UI actions =====
 bot.action("toggle_md", async (ctx) => {
   if (!isAdminCtx(ctx)) return ctx.reply("Access denied (admin only).");
   quietMode = !quietMode;
@@ -186,7 +157,7 @@ bot.action("toggle_md", async (ctx) => {
 
 bot.action("win_6", async (ctx) => { windowHours = 6; await ctx.answerCbQuery("Window: 6h"); });
 bot.action("win_24", async (ctx) => { windowHours = 24; await ctx.answerCbQuery("Window: 24h"); });
-bot.action("win_today", async (ctx) => { windowHours = 24; await ctx.answerCbQuery("Window: Today"); }); // упрощенно
+bot.action("win_today", async (ctx) => { windowHours = 24; await ctx.answerCbQuery("Window: Today"); });
 
 bot.action("diag", async (ctx) => {
   if (!isAdminCtx(ctx)) return ctx.reply("Access denied (admin only).");
@@ -195,38 +166,17 @@ bot.action("diag", async (ctx) => {
   return ctx.reply(text);
 });
 
-bot.action("set_webhook", async (ctx) => {
-  if (!isAdminCtx(ctx)) return ctx.reply("Access denied (admin only).");
-  await ctx.answerCbQuery("Setting webhook...");
-  try {
-    // req headers not available here, so we cannot infer domain reliably from Telegram context.
-    // Use browser endpoint /setwebhook?secret=... for now.
-    return ctx.reply("Use: /setwebhook?secret=... in browser (domain needed).");
-  } catch (e) {
-    pushErr("set_webhook button", e);
-    return ctx.reply("setWebhook error (see diag).");
-  }
-});
-
 bot.action("find_signals", async (ctx) => {
   if (!isAdminCtx(ctx)) return ctx.reply("Access denied (admin only).");
   await ctx.answerCbQuery("Searching...");
 
   try {
-    if (!FOOTBALL_DATA_API_KEY) {
-      return ctx.reply(
-        "FOOTBALL_DATA_API_KEY is not set.\n" +
-        "Add it in Vercel → Settings → Environment Variables → Production."
-      );
-    }
-
     const matches = await fetchMatchesCached(windowHours);
     const report = buildReport(matches, 5, MIN_PERCENT_DM, windowHours);
     if (!report) return ctx.reply("No matches (filtered/threshold).");
     return ctx.reply(report);
   } catch (e) {
     pushErr("find_signals", e);
-    await tgSend(Number(ctx.from.id), `find_signals error: ${e?.message || e}`);
     return ctx.reply("Error. Check env/API limits.");
   }
 });
@@ -246,38 +196,12 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: missing.length === 0, missing });
   }
 
-  if (method === "GET" && url.startsWith("/version")) {
-    return res.status(200).json({
-      ok: true,
-      commit: COMMIT_SHA,
-      time: new Date().toISOString(),
-      windowHours,
-      quietMode,
-      thresholds: { MIN_PERCENT_CHANNEL, MIN_PERCENT_DM }
-    });
-  }
-
   if (method === "GET" && url.startsWith("/diag")) {
     const u = new URL("http://localhost" + url);
     const secret = u.searchParams.get("secret");
     if (!CRON_SECRET) return res.status(500).send("CRON_SECRET is not set");
     if (secret !== CRON_SECRET) return res.status(401).send("Unauthorized");
     return res.status(200).json({ ok: true, lastErrors });
-  }
-
-  if (method === "GET" && url.startsWith("/setwebhook")) {
-    const u = new URL("http://localhost" + url);
-    const secret = u.searchParams.get("secret");
-    if (!CRON_SECRET) return res.status(500).send("CRON_SECRET is not set");
-    if (secret !== CRON_SECRET) return res.status(401).send("Unauthorized");
-
-    try {
-      const out = await setWebhook(req);
-      return res.status(200).json({ ok: true, ...out });
-    } catch (e) {
-      pushErr("setwebhook", e);
-      return res.status(500).send("setWebhook error");
-    }
   }
 
   if (method === "GET" && url.startsWith("/cron")) {
