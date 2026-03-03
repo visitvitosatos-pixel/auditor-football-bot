@@ -1,8 +1,12 @@
-{
+﻿{
   "name": "auditor-football-bot",
   "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node --check api/index.js"
+  },
   "dependencies": {
-    "telegraf": "^4.16.3",
-    "axios": "^1.6.7"
+    "axios": "^1.6.7",
+    "telegraf": "^4.16.3"
   }
 }
