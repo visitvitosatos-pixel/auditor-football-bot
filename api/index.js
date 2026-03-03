@@ -12,12 +12,11 @@
 
     const update = JSON.parse(body || "{}");
 
-    await bot.handleUpdate(update);
+    await bot.handleUpdate(update, res);
 
   } catch (err) {
     console.error("Webhook error:", err);
   }
 
-  // : С 200
-  return res.status(200).send("OK");
+  return res.status(200).end();
 };
