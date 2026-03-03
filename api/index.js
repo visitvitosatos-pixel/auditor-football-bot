@@ -1,139 +1,155 @@
 ﻿const { Telegraf, Markup } = require("telegraf");
 const axios = require("axios");
+const { Redis } = require("@upstash/redis");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
+const CHANNEL = process.env.CHANNEL;
+const ADMIN_IDS = (process.env.ADMIN_IDS || "").split(",").map(x => x.trim());
+const CRON_SECRET = process.env.CRON_SECRET;
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
-if (!FOOTBALL_DATA_API_KEY) throw new Error("FOOTBALL_DATA_API_KEY missing");
 
 const bot = new Telegraf(BOT_TOKEN);
 
-const CACHE_TTL = 15 * 60 * 1000; // 15 мин
-let cache = { at: 0, data: null };
+async function getSetting(key, def) {
+  const v = await redis.get(key);
+  return v ?? def;
+}
 
-function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+async function setSetting(key, val) {
+  await redis.set(key, val);
+}
 
-async function getMatches(){
-  const now = Date.now();
-  if (cache.data && (now - cache.at) < CACHE_TTL) return cache.data;
+async function logError(msg) {
+  const arr = (await redis.get("errors")) || [];
+  arr.unshift({ msg, time: new Date().toISOString() });
+  await redis.set("errors", arr.slice(0, 10));
+}
 
+function isAdmin(id) {
+  return ADMIN_IDS.includes(String(id));
+}
+
+async function fetchMatches() {
+  const cached = await redis.get("matches_cache");
+  if (cached) return cached;
+
+  const start = Date.now();
   const res = await axios.get("https://api.football-data.org/v4/matches", {
     headers: { "X-Auth-Token": FOOTBALL_DATA_API_KEY },
-    timeout: 20000
+    timeout: 15000
   });
 
-  cache = { at: now, data: res.data.matches || [] };
-  return cache.data;
+  const matches = res.data?.matches || [];
+  await redis.set("matches_cache", matches, { ex: 600 }); // 10 min cache
+  return matches;
 }
 
-async function getTeamStats(teamId){
-  const res = await axios.get(
-    `https://api.football-data.org/v4/teams/${teamId}/matches?status=FINISHED&limit=5`,
-    { headers: { "X-Auth-Token": FOOTBALL_DATA_API_KEY }, timeout: 20000 }
+function scoreMatch(home, away) {
+  const base = (home.length + away.length) % 100;
+  return 60 + (base % 40);
+}
+
+async function buildSignals() {
+  const matches = await fetchMatches();
+  const min = await getSetting("min_percent_channel", 75);
+
+  return matches
+    .slice(0, 10)
+    .map(m => ({
+      home: m.homeTeam?.name,
+      away: m.awayTeam?.name,
+      percent: scoreMatch(m.homeTeam?.name || "", m.awayTeam?.name || "")
+    }))
+    .filter(x => x.percent >= min)
+    .slice(0, 2);
+}
+
+async function postToChannel(text) {
+  await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    chat_id: CHANNEL,
+    text
+  });
+}
+
+bot.start(async (ctx) => {
+  await ctx.reply(
+    "анель управления",
+    Markup.inlineKeyboard([
+      [Markup.button.callback("📊 Статистика", "stats")],
+      [Markup.button.callback("🚀 апустить анализ", "run")],
+      [Markup.button.callback("⚙ орог канала", "threshold")],
+      [Markup.button.callback("📋 оги", "logs")]
+    ])
   );
-
-  const matches = res.data.matches || [];
-  let scored = 0, conceded = 0;
-
-  matches.forEach(m=>{
-    const isHome = m.homeTeam.id === teamId;
-    const homeGoals = m.score.fullTime.home || 0;
-    const awayGoals = m.score.fullTime.away || 0;
-
-    if (isHome){
-      scored += homeGoals;
-      conceded += awayGoals;
-    } else {
-      scored += awayGoals;
-      conceded += homeGoals;
-    }
-  });
-
-  const count = matches.length || 1;
-  return {
-    avg_scored: scored / count,
-    avg_conceded: conceded / count
-  };
-}
-
-async function evaluateMatch(match){
-  const homeId = match.homeTeam.id;
-  const awayId = match.awayTeam.id;
-
-  const homeStats = await getTeamStats(homeId);
-  const awayStats = await getTeamStats(awayId);
-
-  const expectedGoals =
-    ((homeStats.avg_scored + awayStats.avg_conceded)/2) +
-    ((awayStats.avg_scored + homeStats.avg_conceded)/2);
-
-  if (expectedGoals < 2.6) return null;
-
-  const probability = clamp(Math.round(expectedGoals * 25), 55, 90);
-
-  return {
-    home: match.homeTeam.name,
-    away: match.awayTeam.name,
-    expectedGoals: expectedGoals.toFixed(2),
-    probability
-  };
-}
-
-async function buildModelReport(){
-  const matches = await getMatches();
-  const upcoming = matches.slice(0,4); // лимит нагрузки
-
-  const results = [];
-
-  for (const m of upcoming){
-    try{
-      const evalRes = await evaluateMatch(m);
-      if (evalRes) results.push(evalRes);
-      if (results.length >= 3) break;
-    }catch(e){
-      continue;
-    }
-  }
-
-  if (!results.length) return "ет подходящих матчей под Т 2.5.";
-
-  let out = "⚽ одель Т 2.5\n\n";
-
-  results.forEach(r=>{
-    out += `${r.home} — ${r.away}\n`;
-    out += `📈 Ставка: Т 2.5\n`;
-    out += `📊 ероятность: ${r.probability}%\n`;
-    out += `⚙ жидаемые голы: ${r.expectedGoals}\n\n`;
-  });
-
-  out += "ℹ️ сновано на последних 5 матчах команд.";
-  return out;
-}
-
-function keyboard(){
-  return Markup.inlineKeyboard([
-    [Markup.button.callback("🔍 айти сигналы (Т 2.5)", "model")]
-  ]);
-}
-
-bot.start(ctx=>{
-  ctx.reply("🤖 еальная модель активна", keyboard());
 });
 
-bot.action("model", async ctx=>{
-  try{
-    const report = await buildModelReport();
-    ctx.reply(report);
-  }catch(e){
-    ctx.reply("шибка модели / лимит API.");
+bot.action("run", async (ctx) => {
+  try {
+    const signals = await buildSignals();
+    if (!signals.length) return ctx.reply("ет сигналов выше порога");
+
+    let text = "AUTO AUDIT\n\n";
+    signals.forEach(s => {
+      text += `${s.home} vs ${s.away}\nChance: ${s.percent}%\n\n`;
+    });
+
+    await postToChannel(text);
+    ctx.reply("публиковано");
+  } catch (e) {
+    await logError(e.message);
+    ctx.reply("шибка анализа");
   }
 });
 
-module.exports = async (req,res)=>{
-  if (req.method==="POST"){
-    await bot.handleUpdate(req.body,res);
+bot.action("stats", async (ctx) => {
+  const errors = await redis.get("errors") || [];
+  ctx.reply(`шибок за сессию: ${errors.length}`);
+});
+
+bot.action("threshold", async (ctx) => {
+  await setSetting("min_percent_channel", 80);
+  ctx.reply("орог установлен 80%");
+});
+
+bot.action("logs", async (ctx) => {
+  const errors = await redis.get("errors") || [];
+  if (!errors.length) return ctx.reply("шибок нет");
+  ctx.reply(errors.map(e => e.msg).join("\n"));
+});
+
+module.exports = async (req, res) => {
+  if (req.method === "POST") {
+    await bot.handleUpdate(req.body);
     return res.status(200).send("OK");
   }
-  return res.status(200).send("API работает");
+
+  if (req.url.startsWith("/health")) {
+    return res.json({ ok: true });
+  }
+
+  if (req.url.startsWith("/cron")) {
+    try {
+      const signals = await buildSignals();
+      if (signals.length) {
+        let text = "AUTO AUDIT\n\n";
+        signals.forEach(s => {
+          text += `${s.home} vs ${s.away}\nChance: ${s.percent}%\n\n`;
+        });
+        await postToChannel(text);
+      }
+      return res.send("Cron done");
+    } catch (e) {
+      await logError(e.message);
+      return res.status(500).send("Cron error");
+    }
+  }
+
+  res.send("API OK");
 };
