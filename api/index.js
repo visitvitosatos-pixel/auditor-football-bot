@@ -3,8 +3,8 @@ const axios = require("axios");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
-const CHANNEL = process.env.CHANNEL;         // "@channel_username" или "-100..."
-const CRON_SECRET = process.env.CRON_SECRET; // длинная случайная строка
+const CHANNEL = process.env.CHANNEL;
+const CRON_SECRET = process.env.CRON_SECRET;
 
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN is missing in env");
 const bot = new Telegraf(BOT_TOKEN);
@@ -27,12 +27,10 @@ async function fetchMatches() {
 
 function buildReport(matches) {
   if (!matches?.length) return null;
-
   let report = "📈 *Т-УТ*\n\n";
   matches.slice(0, 5).forEach((m) => {
     const home = m.homeTeam?.name ?? "Home";
     const away = m.awayTeam?.name ?? "Away";
-
     const matchPower = (String(home).length + String(away).length) % 10;
 
     let prediction, percent;
@@ -44,7 +42,6 @@ function buildReport(matches) {
     report += `🎯 ${prediction}\n`;
     report += `📊 ${percent}%\n\n`;
   });
-
   report += "⚠️ ероятностная модель, не гарантия.\n";
   return report;
 }
@@ -75,23 +72,45 @@ module.exports = async (req, res) => {
   const url = req.url || "/";
   const method = req.method || "GET";
 
-  // 0) /health -> какие env  заданы (значения не выводим)
+  // /health
   if (method === "GET" && url.startsWith("/health")) {
     const missing = [];
     if (!process.env.BOT_TOKEN) missing.push("BOT_TOKEN");
     if (!process.env.FOOTBALL_DATA_API_KEY) missing.push("FOOTBALL_DATA_API_KEY");
     if (!process.env.CHANNEL) missing.push("CHANNEL");
     if (!process.env.CRON_SECRET) missing.push("CRON_SECRET");
-
     return res.status(200).json({ ok: missing.length === 0, missing });
   }
 
-  // 1) GET /cron?secret=... -> постит в канал
+  // /setwebhook?secret=... -> выставить webhook на текущий домен
+  if (method === "GET" && url.startsWith("/setwebhook")) {
+    try {
+      const u = new URL("http://localhost" + url);
+      const secret = u.searchParams.get("secret");
+      if (!CRON_SECRET) return res.status(500).send("CRON_SECRET is not set");
+      if (secret !== CRON_SECRET) return res.status(401).send("Unauthorized");
+
+      const host = req.headers["x-forwarded-host"] || req.headers["host"];
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const webhookUrl = `${proto}://${host}/`;
+
+      const tg = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
+        params: { url: webhookUrl },
+        timeout: 15000
+      });
+
+      return res.status(200).json({ ok: true, webhookUrl, tg: tg.data });
+    } catch (e) {
+      console.error(e?.response?.data || e);
+      return res.status(500).send("setWebhook error");
+    }
+  }
+
+  // /cron
   if (method === "GET" && url.startsWith("/cron")) {
     try {
       const u = new URL("http://localhost" + url);
       const secret = u.searchParams.get("secret");
-
       if (!CRON_SECRET) return res.status(500).send("CRON_SECRET is not set");
       if (secret !== CRON_SECRET) return res.status(401).send("Unauthorized");
 
@@ -107,7 +126,7 @@ module.exports = async (req, res) => {
     }
   }
 
-  // 2) POST -> Telegram webhook
+  // Telegram webhook updates
   if (method === "POST") {
     try { await bot.handleUpdate(req.body, res); } catch (e) { console.error(e); }
     return res.status(200).send("OK");
