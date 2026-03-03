@@ -1,24 +1,31 @@
 ﻿const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
+// Инициализация бота с токеном из переменных окружения
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// станавливаем Webhook обработчик
+// Основной обработчик для Vercel (Serverless Function)
 module.exports = async (req, res) => {
     try {
         if (req.method === 'POST') {
+            // Обработка обновлений от Telegram
             await bot.handleUpdate(req.body, res);
         } else {
-            res.status(200).send('от-удитор активен!');
+            // Ответ для проверки работоспособности в браузере
+            res.status(200).send('Бот-Аудитор активен и работает!');
         }
     } catch (e) {
-        console.error('шибка в Webhook:', e);
-        res.status(500).send('шибка сервера');
+        console.error('Ошибка в Webhook:', e);
+        res.status(500).send('Ошибка на стороне сервера');
     }
 };
 
-bot.start((ctx) => ctx.reply('от-удитор на связи! тобы проверить футбол, нажми /check'));
+// Команда /start
+bot.start((ctx) => {
+    return ctx.reply('Бот-Аудитор на связи! Чтобы проверить статус футбольного API, нажми /check');
+});
 
+// Команда /check для проверки связи с RapidAPI
 bot.command('check', async (ctx) => {
     try {
         const response = await axios.get('https://api-football-v1.p.rapidapi.com/v3/timezone', {
@@ -27,8 +34,9 @@ bot.command('check', async (ctx) => {
                 'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
             }
         });
-        ctx.reply('✅ API Football на Vercel работает! айдено зон: ' + response.data.results);
+        return ctx.reply('✅ API Football на Vercel работает! Найдено зон: ' + response.data.results);
     } catch (err) {
-        ctx.reply('❌ шибка API: ' + err.message);
+        console.error('Ошибка API:', err.message);
+        return ctx.reply('❌ Ошибка API: ' + err.message);
     }
 });
