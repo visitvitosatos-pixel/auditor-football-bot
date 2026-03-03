@@ -2,11 +2,9 @@
   "name": "auditor-football-bot",
   "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": "20.x"
-  },
+  "engines": { "node": "20.x" },
   "scripts": {
-    "build": "node -e \"JSON.parse(require('fs').readFileSync('vercel.json','utf8'))\" && node --check api/index.js"
+    "build": "node -e \"JSON.parse(require('fs').readFileSync('package.json','utf8')); JSON.parse(require('fs').readFileSync('vercel.json','utf8'));\" && node --check api/index.js"
   },
   "dependencies": {
     "axios": "^1.6.7",

@@ -75,7 +75,18 @@ module.exports = async (req, res) => {
   const url = req.url || "/";
   const method = req.method || "GET";
 
-  // GET /cron?secret=... -> постит в канал
+  // 0) /health -> какие env  заданы (значения не выводим)
+  if (method === "GET" && url.startsWith("/health")) {
+    const missing = [];
+    if (!process.env.BOT_TOKEN) missing.push("BOT_TOKEN");
+    if (!process.env.FOOTBALL_DATA_API_KEY) missing.push("FOOTBALL_DATA_API_KEY");
+    if (!process.env.CHANNEL) missing.push("CHANNEL");
+    if (!process.env.CRON_SECRET) missing.push("CRON_SECRET");
+
+    return res.status(200).json({ ok: missing.length === 0, missing });
+  }
+
+  // 1) GET /cron?secret=... -> постит в канал
   if (method === "GET" && url.startsWith("/cron")) {
     try {
       const u = new URL("http://localhost" + url);
@@ -96,7 +107,7 @@ module.exports = async (req, res) => {
     }
   }
 
-  // POST -> Telegram webhook
+  // 2) POST -> Telegram webhook
   if (method === "POST") {
     try { await bot.handleUpdate(req.body, res); } catch (e) { console.error(e); }
     return res.status(200).send("OK");
