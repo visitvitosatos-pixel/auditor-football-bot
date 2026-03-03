@@ -1,31 +1,27 @@
-﻿const { Telegraf } = require('telegraf');
+const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
-// Инициализация бота с токеном из переменных окружения
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Основной обработчик для Vercel (Serverless Function)
+// бработчик Webhook для Vercel
 module.exports = async (req, res) => {
     try {
         if (req.method === 'POST') {
-            // Обработка обновлений от Telegram
             await bot.handleUpdate(req.body, res);
         } else {
-            // Ответ для проверки работоспособности в браузере
-            res.status(200).send('Бот-Аудитор активен и работает!');
+            res.status(200).send('от-удитор запущен и работает корректно!');
         }
     } catch (e) {
-        console.error('Ошибка в Webhook:', e);
-        res.status(500).send('Ошибка на стороне сервера');
+        console.error('шибка в Webhook:', e);
+        res.status(500).send('шибка сервера');
     }
 };
 
-// Команда /start
+// оманды бота
 bot.start((ctx) => {
-    return ctx.reply('Бот-Аудитор на связи! Чтобы проверить статус футбольного API, нажми /check');
+    return ctx.reply('⚽ от-удитор на связи!\n\nоступные команды:\n/check - роверка связи с API\n/next - лижайший матч\n/leagues - Список лиг');
 });
 
-// Команда /check для проверки связи с RapidAPI
 bot.command('check', async (ctx) => {
     try {
         const response = await axios.get('https://api-football-v1.p.rapidapi.com/v3/timezone', {
@@ -34,9 +30,42 @@ bot.command('check', async (ctx) => {
                 'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
             }
         });
-        return ctx.reply('✅ API Football на Vercel работает! Найдено зон: ' + response.data.results);
+        return ctx.reply('✅ API Football работает! он найдено: ' + response.data.results);
     } catch (err) {
-        console.error('Ошибка API:', err.message);
-        return ctx.reply('❌ Ошибка API: ' + err.message);
+        return ctx.reply('❌ шибка API: ' + err.message);
+    }
+});
+
+bot.command('next', async (ctx) => {
+    try {
+        const response = await axios.get('https://api-football-v1.p.rapidapi.com/v3/fixtures', {
+            params: { next: '1' },
+            headers: {
+                'X-RapidAPI-Key': process.env.FOOTBALL_API_KEY,
+                'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
+            }
+        });
+        const game = response.data.response[0];
+        if (!game) return ctx.reply('атчей не найдено.');
+        const message = "🏟 лижайший матч:\n" + game.teams.home.name + " vs " + game.teams.away.name + "\nига: " + game.league.name;
+        return ctx.reply(message);
+    } catch (err) {
+        return ctx.reply('❌ шибка получения матча: ' + err.message);
+    }
+});
+
+bot.command('leagues', async (ctx) => {
+    try {
+        const response = await axios.get('https://api-football-v1.p.rapidapi.com/v3/leagues', {
+            params: { country: 'England', season: '2024' },
+            headers: {
+                'X-RapidAPI-Key': process.env.FOOTBALL_API_KEY,
+                'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
+            }
+        });
+        const list = response.data.response.slice(0, 5).map(item => "🏆 " + item.league.name).join('\n');
+        return ctx.reply("🏴󠁧󠁢󠁥󠁮󠁧󠁿 Топ лиги нглии:\n" + list);
+    } catch (err) {
+        return ctx.reply('❌ шибка лиг: ' + err.message);
     }
 });
