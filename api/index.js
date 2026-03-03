@@ -26,13 +26,16 @@ async function fetchMatches() {
     const now = new Date();
 
     const filteredMatches = (res.data.matches || [])
-      .filter(m => {
-        const matchStart = new Date(m.utcDate);
-        return matchStart > now;
-      })
-      .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+  .filter(m => {
+    const matchStart = new Date(m.utcDate);
+    return matchStart > now;
+  })
+  .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
 
-    return filteredMatches;
+console.log("Всего матчей из API:", res.data.matches.length);
+console.log("После фильтра:", filteredMatches.length);
+
+return filteredMatches;
 
   } catch (err) {
 
