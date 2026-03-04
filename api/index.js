@@ -30,28 +30,23 @@ async function fetchMatches() {
       }
     );
 
-    const now = new Date();
-    const next24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    // Текущее время в миллисекундах (локальное)
+    const nowTs = new Date().getTime(); 
+
+    // Время через 24 часа в миллисекундах
+    const next24hTs = nowTs + 24 * 60 * 60 * 1000; 
 
     const matches = (res.data.matches || [])
       .filter(m => {
-        const kickoff = new Date(m.utcDate);
+        const kickoffTs = new Date(m.utcDate).getTime();  // Время начала матча (в миллисекундах)
 
-        // 1. Строго только SCHEDULED
-        if (m.status !== "SCHEDULED") return false;
-
-        // 2. Если вдруг уже есть финальный счёт — исключаем
-        if (m.score?.fullTime?.home !== null) return false;
-
-        // 3. Исключаем уже начавшиеся
-        if (kickoff <= now) return false;
-
-        // 4. Только ближайшие 24 часа
-        if (kickoff > next24h) return false;
+        // Исключаем матчи, которые уже прошли или не в пределах ближайших 24 часов
+        if (kickoffTs <= nowTs) return false;  // Если матч уже начался или начнётся раньше
+        if (kickoffTs > next24hTs) return false; // Если матч позже чем через 24 часа
 
         return true;
       })
-      .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+      .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate)); // Сортировка по времени начала
 
     console.log("Всего матчей из API:", res.data.matches.length);
     console.log("После строгой фильтрации:", matches.length);
@@ -59,7 +54,6 @@ async function fetchMatches() {
     return matches;
 
   } catch (err) {
-
     if (err.response) {
       const code = err.response.status;
 
