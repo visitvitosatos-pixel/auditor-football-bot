@@ -4,24 +4,22 @@ const axios = require("axios");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
 // В Vercel переменная называется FOOTBALL_DATA_API_KEY
-// Здесь мы присваиваем её в локальную переменную API_KEY
+// Здесь сохраняем её в API_KEY
 const API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// --------------------
-// Простая модель сигнала
-// --------------------
+// ---------------- SIGNAL MODEL ----------------
+// Временная модель (плейсхолдер)
 function calculateSignal(home, away) {
   const base = (home.length + away.length) % 100;
   return 60 + (base % 40);
 }
 
-// --------------------
-// Получаем матчи ближайших 24 часов
-// --------------------
+// ---------------- FETCH MATCHES ----------------
+// Берём только ближайшие 24 часа
 async function fetchMatches() {
   try {
     const res = await axios.get(
@@ -38,12 +36,25 @@ async function fetchMatches() {
     const matches = (res.data.matches || [])
       .filter(m => {
         const kickoff = new Date(m.utcDate);
-        return kickoff >= now && kickoff <= next24h;
+
+        // 1. Строго только SCHEDULED
+        if (m.status !== "SCHEDULED") return false;
+
+        // 2. Если вдруг уже есть финальный счёт — исключаем
+        if (m.score?.fullTime?.home !== null) return false;
+
+        // 3. Исключаем уже начавшиеся
+        if (kickoff <= now) return false;
+
+        // 4. Только ближайшие 24 часа
+        if (kickoff > next24h) return false;
+
+        return true;
       })
       .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
 
     console.log("Всего матчей из API:", res.data.matches.length);
-    console.log("После фильтра (24ч):", matches.length);
+    console.log("После строгой фильтрации:", matches.length);
 
     return matches;
 
@@ -66,9 +77,7 @@ async function fetchMatches() {
   }
 }
 
-// --------------------
-// Команда /start
-// --------------------
+// ---------------- BOT START ----------------
 bot.start((ctx) => {
   return ctx.reply(
     "Бот активен.\nВыберите действие:",
@@ -78,9 +87,7 @@ bot.start((ctx) => {
   );
 });
 
-// --------------------
-// Кнопка сигналов
-// --------------------
+// ---------------- SIGNAL ACTION ----------------
 bot.action("signals", async (ctx) => {
   try {
     await ctx.answerCbQuery();
@@ -95,6 +102,7 @@ bot.action("signals", async (ctx) => {
     let count = 0;
 
     for (const m of matches) {
+
       const home = m.homeTeam?.name;
       const away = m.awayTeam?.name;
       const kickoff = new Date(m.utcDate);
@@ -134,15 +142,15 @@ bot.action("signals", async (ctx) => {
   }
 });
 
-// --------------------
-// Webhook handler
-// --------------------
+// ---------------- WEBHOOK HANDLER ----------------
 module.exports = async (req, res) => {
+
   if (req.method !== "POST") {
     return res.status(200).send("OK");
   }
 
   try {
+
     let body = "";
 
     for await (const chunk of req) {
