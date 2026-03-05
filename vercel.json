@@ -5,6 +5,6 @@
     { "source": "/api/(.*)", "destination": "/api/index" }
   ],
   "functions": {
-    "api/index.js": { "runtime": "nodejs20.x" }
+    "api/index.js": { "maxDuration": 10, "memory": 1024 }
   }
 }
